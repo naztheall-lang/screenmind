@@ -1,0 +1,33 @@
+name: Make APK
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: 17}
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: 8.11.1}
+      - run: |
+          unzip -q ScreenMind.zip -d /tmp
+          if [ -d app ]; then cp -r app /tmp/ScreenMind/; fi
+          cd /tmp/ScreenMind
+          S=fail
+          { bash scripts/fetch_stockfish.sh && gradle assembleDebug testDebugUnitTest --continue; } >/tmp/log 2>&1 && S=ok
+          if ls app/build/outputs/apk/debug/*.apk; then
+            gh release create build-$GITHUB_RUN_NUMBER app/build/outputs/apk/debug/*.apk -R $GITHUB_REPOSITORY -t ScreenMind -n "Result: $S. Includes Stockfish 17.1 (GPL v3) https://github.com/official-stockfish/Stockfish"
+          fi
+          mkdir /tmp/r && cd /tmp/r
+          echo $S >status
+          grep -E -A3 '^e: |error:|wrong:|FAILED' /tmp/log | head -80 >errors || true
+          tail -40 /tmp/log >tail
+          git init -qb build-log && git add . && git -c user.name=ci -c user.email=ci@ci commit -qm report
+          git push -qf https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY build-log
+          test $S = ok
