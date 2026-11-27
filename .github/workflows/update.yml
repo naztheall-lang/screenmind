@@ -1,0 +1,33 @@
+name: Update APK
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: 17}
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: 8.11.1}
+      - run: |
+          Z=$(git log --diff-filter=AM --name-only --pretty=format: -- '*.zip' | grep -m1 zip)
+          unzip -q "$Z" -d /tmp
+          cd /tmp/ScreenMind
+          S=fail
+          { bash scripts/fetch_stockfish.sh && gradle assembleDebug testDebugUnitTest --continue; } >/tmp/log 2>&1 && S=ok
+          if ls app/build/outputs/apk/debug/*.apk; then
+            gh release create update-$GITHUB_RUN_NUMBER app/build/outputs/apk/debug/*.apk -R $GITHUB_REPOSITORY -t "ScreenMind update" -n "Result: $S. Includes Stockfish 17.1 (GPL v3) https://github.com/official-stockfish/Stockfish"
+          fi
+          mkdir /tmp/r && cd /tmp/r
+          echo "$S $Z" >status
+          grep -E -A3 '^e: |error:|wrong:|FAILED' /tmp/log | head -80 >errors || true
+          tail -40 /tmp/log >tail
+          git init -qb update-log && git add . && git -c user.name=ci -c user.email=ci@ci commit -qm report
+          git push -qf https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY update-log
